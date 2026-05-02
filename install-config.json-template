@@ -1,0 +1,9 @@
+{
+  "BOOMADMINS": "$USER",
+  "BOOMINSTALL": "\\\"\\\\${XDG_DATA_HOME:-\\\\${HOME}/.local/share}/boom\\\"",
+  "BOOMTZ": "\\\"$(timedatectl show -p Timezone --value 2>/dev/null || { readlink /etc/localtime | sed 's|.*zoneinfo/||'; })\\\"",
+  "BOOMCONTS": "sudo docker",
+  "BOOMPORT": 9029,
+  "BOOMSITE": "\\\"\\\\${GS_URL}/boom\\\"",
+  "BOOMSITECMD": "firefox --new-tab"
+}

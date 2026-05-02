@@ -1,0 +1,695 @@
+#!/usr/bin/env bash
+
+AUTOBOOMBOT=
+_SILENTBOOM=no
+
+# Starts at -1 to preserve legacy (pre offline-2.2.9) "feature" of booming on terminal start
+BOOMPREV_CMDNO=-1
+BOOMPREV_HISTCMD=$HISTCMD # int currrent cmd num in history
+[[ -z "$_BOOMDEFAULTTIMEOUT" ]] && readonly _BOOMDEFAULTTIMEOUT=900 &>/dev/null
+
+readonly BOOM_MAGICPROMPT='\#' &>/dev/null
+readonly BOOM_MAXASCIILINES=${BOOM_MAXASCIILINES:-34} &>/dev/null
+readonly BOOM_MAXASCIICOLS=${BOOM_MAXASCIICOLS:-57} &>/dev/null
+__boomcmdno() {
+  export $1=$(printf '%s' "${BOOM_MAGICPROMPT@P}")
+}
+
+__boomvar() {
+  local action="$1" var="$2"
+  case _${action}_ in
+    _activate_)
+      export $var="yes"
+    ;;
+    _active_)
+      [[ "${!var}" == "yes" ]]
+      return
+    ;;
+    _inactive_)
+      [[ "${!var}" != "yes" ]]
+      return
+    ;;
+  esac
+}
+__doom() {
+  local action="$1"
+  case _${action}_ in
+    _127_)
+      if __doom active; then
+        echo bash: ${FUNCNAME[-1]}: command not found
+        return 127
+      fi
+      return 0
+    ;;
+    _activate_) ;&
+    _active_) ;&
+    _inactive_)
+      __boomvar $action DOOMBOOM
+      return
+    ;;
+    _file-access_)
+      [[ ! -w "$2" ]] && __boomvar activate DOOMBOOM
+    ;;
+    _persist_)
+      if [[ -w "$_doomTracker" ]] && __doom tracker-oos; then
+        if [[ "$(cat $_doomTracker 2>/dev/null)" =~ "yes" ]]; then
+          clear
+        else
+          export AUTOBOOMBOT=
+          echo $_BE_BOOM$_BE_BOOM WE BRING THE BOOM $_BE_BOOM$_BE_BOOM
+        fi
+        DOOMBOOM=$(cat $_doomTracker)
+      fi
+    ;;
+    _tracker-oos_)
+      # Is the tracker out of state?
+      [[ "$(cat $_doomTracker 2>/dev/null)" != "$DOOMBOOM" ]]
+      return
+    ;;
+  esac
+}
+
+# Optional boom configuration files
+#if [[ -r "/$BOOMUSERDIR/$BOOMBOSS/$BOOMRCS/optional/.boomholidayrc" && -z "$NOBOOMHOLIDAY" ]]; then
+#  # Boom holiday emojis
+#  source /$BOOMUSERDIR/$BOOMBOSS/$BOOMRCS/optional/.boomholidayrc
+#fi
+
+_BE_BOOM_DEF="💥"
+_BE_HOLE_DEF="🕳️"
+_BE_BOT_DEF="🤖"
+_BE_SUPER_DEF="⚡️"
+_BE_HOG_DEF="🐷"
+_BE_IMPORT_DEF="⬇️"
+_BE_EXPORT_DEF="⬆️"
+_BE_CHECK_DEF="✅"
+
+# This is broken \/
+_BE_BOOM=
+_BE_HOLE=
+_BE_BOT=
+_BE_SUPER=
+_BE_HOG=
+_BE_IMPORT=
+_BE_EXPORT=
+_BE_CHECK=
+
+[ -z "$_BE_BOOM" ] && _BE_BOOM="${BOOM_EMOJI:-$_BE_BOOM_DEF}"
+[ -z "$_BE_HOLE" ] && _BE_HOLE="${HOLE_EMOJI:-$_BE_HOLE_DEF}"
+[ -z "$_BE_BOT" ] && _BE_BOT="${BOT_EMOJI:-$_BE_BOT_DEF}"
+[ -z "$_BE_SUPER" ] && _BE_SUPER="${SUPER_EMOJI:-$_BE_SUPER_DEF}"
+[ -z "$_BE_HOG" ] && _BE_HOG="${HOG_EMOJI:-$_BE_HOG_DEF}"
+[ -z "$_BE_IMPORT" ] && _BE_IMPORT="${IMPORT_EMOJI:-$_BE_IMPORT_DEF}"
+[ -z "$_BE_EXPORT" ] && _BE_EXPORT="${EXPORT_EMOJI:-$_BE_EXPORT_DEF}"
+[ -z "$_BE_CHECK" ] && _BE_CHECK="${CHECK_EMOJI:-$_BE_CHECK_DEF}"
+
+__goodEmoji() {
+  # Really just making sure emojis aren't terrible chars
+  local s="$1"
+  local exitCode=0
+
+  # Reject empty just in case
+  [[ -z "$s" ]] && exitCode=1
+
+  # Reject any whitespace
+  [[ "$s" == *[[:space:]]* ]] && exitCode=2
+
+  # Reject any ASCII control characters
+  LC_ALL=C printf '%s' "$s" | grep -q '[[:cntrl:]]' && exitCode=3
+
+  # Reject shell metacharacters
+  [[ "$s" == *[\`\"\'\\\$]* ]] && exitCode=4
+
+  # Reject long strings
+  (( ${#s} >= 3 )) && exitCode=5
+
+  if (( exitCode != 0 )); then
+    __gs_errormsg "$s is an invalid emoji, ignoring with exit code $exitCode..."
+  fi
+
+  return $exitCode
+}
+__goodEmoji "$_BE_BOOM" || _BE_BOOM="$_BE_BOOM_DEF"
+__goodEmoji "$_BE_HOLE" || _BE_HOLE="$_BE_HOLE_DEF"
+__goodEmoji "$_BE_BOT" || _BE_BOT="$_BE_BOT_DEF"
+__goodEmoji "$_BE_SUPER" || _BE_SUPER="$_BE_SUPER_DEF"
+__goodEmoji "$_BE_HOG" || _BE_HOG="$_BE_HOG_DEF"
+__goodEmoji "$_BE_IMPORT" || _BE_IMPORT="$_BE_IMPORT_DEF"
+__goodEmoji "$_BE_EXPORT" || _BE_EXPORT="$_BE_EXPORT_DEF"
+__goodEmoji "$_BE_CHECK" || _BE_CHECK="$_BE_CHECK_DEF"
+unset -f __goodEmoji
+
+#TODO: If BOOMINSTALL doesn't exist, set up in /tmp
+[[ "$BOOMINSTALL" != "$(echo -n ~/${BOOMINSTALL#$HOME/})" ]] && __doom activate
+if [[ ! -d "$BOOMINSTALL" ]] && __doom inactive; then mkdir -p "$BOOMINSTALL" &>/dev/null; fi
+[[ ! -w "$BOOMINSTALL" ]] && __doom activate
+
+case $HISTCONTROL in
+  *ignoreboth*) ;&
+  *ignorespace*)
+    if [ "$BOOMWARN" != "no" ]; then
+      echo boomrc: WARNING: ignoreboth or ignorespace in HISTCONTROL will cause bugged booms when running ignored commands
+      echo boomrc: Suppress this warning by sourcing with \`BOOMWARN=no source $BASH_SOURCE\`
+    fi
+  ;;
+esac
+
+_boomTracker="${BOOMINSTALL}/.boomtracker-$GS_USER"
+_boomRankings="${BOOMINSTALL}/.boomrankings-$GS_USER"
+_boomStreak="${BOOMINSTALL}/.boomstreak-$GS_USER"
+_boomDrought="${BOOMINSTALL}/.boomdrought-$GS_USER"
+_boomNotify="${BOOMINSTALL}/.boomnotify-$GS_USER"
+_boomBotModeBooms="${BOOMINSTALL}/.bbmdailybooms-$GS_USER"
+_doomTracker="${BOOMINSTALL}/.doomtracker-$GS_USER"
+_boomActionCache="${BOOMINSTALL}/.boomactioncache-$GS_USER"
+#_boomEmojis="${BOOMINSTALL}/.boomemojis"
+
+# Add chat to HISTIGNORE
+[[ ! " $HISTIGNORE " =~ " chat* " ]] && export HISTIGNORE="${HISTIGNORE:+$HISTIGNORE:}chat*"
+#TODO: User defined by GS_USER so can login as yourself from anywhere
+#TODO: Add user to boomusers if missing
+#TODO: Add user to drought record if missing
+[[ ! -f "$_boomTracker" ]] && echo "" > $_boomTracker
+[[ ! -f "$_boomStreak" ]] && echo -n "" > $_boomStreak
+[[ ! -f "$_boomDrought" ]] && echo -n "0" > $_boomDrought
+[[ ! -f "$_boomNotify" ]] && echo -n "" > $_boomNotify
+[[ ! -f "$_boomBotModeBooms" ]] && echo -n "0" > $_boomBotModeBooms
+[[ ! -f "$_boomActionCache" ]] && command touch $_boomActionCache
+if [[ -f "$_boomRankings" ]]; then
+  command chmod 644 "$_boomRankings" &>/dev/null
+  [[ ! -w "$_boomRankings" ]] && __doom activate
+fi
+
+#TODO: Implementation of emojis in boom chat
+# Uses emoji master list copied to home at source time (for speed)
+#if [ "$USER" != "$BOOMBOSS" ]; then
+#  if [ -r "$_boomEmojiSource" ]; then
+#    \cp -f $_boomEmojiSource $_boomEmojis
+#  else
+#    echo $_BE_BOOM_DEF F09F92A5 -boom-> $_boomEmojis
+#  fi
+#fi
+
+# BOOM Import from ssh or container
+_boomImports="${BOOMINSTALL}/.boomimport"
+[[ ! -d $_boomImports ]] && command mkdir -p "$_boomImports" &>/dev/null
+command chmod 777 $_boomImports &>/dev/null
+_boomSession="${_boomImports}/.sessionlog"
+_boomImportReady="${_boomImports}/.import"
+if [[ ! -f $_boomSession ]]; then
+  echo -n "" > $_boomSession
+  command chmod 644 $_boomSession &>/dev/null
+fi
+
+# BOOM goal
+#TODO: control goal files on server
+#_boomGoal=/$BOOMUSERDIR/$BOOMBOSS/$BOOMINSTALL/.boomgoal
+#_boomGoalContrib=/$BOOMUSERDIR/$BOOMBOSS/$BOOMINSTALL/.boomgoalcontributors
+#TODO: Stat tracking stuff
+
+__doom file-access "$_boomTracker"
+__doom file-access "$_boomStreak"
+__doom file-access "$_boomDrought"
+__doom file-access "$_boomBotModeBooms"
+__doom file-access "$_boomActionCache"
+
+# Handle doom state - if something above failed, write to persistent doom if able
+__doom active && __doom tracker-oos && __gs_errormsg "doom activated due to failure on source"
+if [[ ! -f "$_doomTracker" ]]; then echo -n "$DOOMBOOM" > $_doomTracker
+elif __doom active && [[ -w "$_doomTracker" ]]; then echo -n yes > $_doomTracker
+elif __doom inactive && [[ -z "$BOOMSITERUNNER" ]]; then DOOMBOOM=$(cat $_doomTracker)
+fi
+__doom file-access "$_doomTracker"
+
+command chmod 644 $_boomStreak $_boomTracker $_boomDrought $_boomBotModeBooms $_boomEmojis $_doomTracker &>/dev/null
+#TODO: Change how notifications work
+#command chmod 777 $_boomNotify &>/dev/null
+
+# Set up user account on site if not created
+#if [[ -z "$DOOMBOOM" && -z "$BOOMSITERUNNER" && -n "$BOOMSITE" ]]; then
+#  curl -m 1 -X POST -H "Content-Type: application/json" -d "{\"username\": \"$USER\"}" $BOOMSITE/boomuser &>/dev/null
+#fi
+
+# Set up site config env based on current env
+#if [[ -z "$DOOMBOOM" && -z "$BOOMSITERUNNER" && -w "/$BOOMUSERDIR/$BOOMBOSS/$BOOMINSTALL/.boomserver/data/env/" ]]; then
+#  boomSiteUserJson=/$BOOMUSERDIR/$BOOMBOSS/$BOOMINSTALL/.boomserver/data/env/$USER.json
+#  tmp="$(mktemp --tmpdir="${boomSiteUserJson%/*}" ".${boomSiteUserJson##*/}.tmp.XXX")"
+#
+#  echo "{ \"columns\": \"${BOOMTABLECOLS:-$(cat $_boomUsers | xargs)}\"," \
+#    > $tmp
+#  echo "  \"boom_emoji\": \"${_BE_BOOM}\"," \
+#    >> $tmp
+#  echo "  \"hole_emoji\": \"${_BE_HOLE}\"," \
+#    >> $tmp
+#  echo "  \"bot_emoji\": \"${_BE_BOT}\"," \
+#    >> $tmp
+#  echo "  \"super_emoji\": \"${_BE_SUPER}\"," \
+#    >> $tmp
+#  echo "  \"hog_emoji\": \"${_BE_HOG}\"," \
+#    >> $tmp
+#  echo "  \"import_emoji\": \"${_BE_IMPORT}\"," \
+#    >> $tmp
+#  echo "  \"export_emoji\": \"${_BE_EXPORT}\"," \
+#    >> $tmp
+#  echo "  \"check_emoji\": \"${_BE_CHECK}\"," \
+#    >> $tmp
+#  echo "  \"ignore_holiday_emojis\": \"${NOBOOMHOLIDAY+true}\" }" \
+#    >> $tmp
+#
+#  \mv $tmp $boomSiteUserJson &>/dev/null
+#  \chmod 644 /$BOOMUSERDIR/$BOOMBOSS/$BOOMINSTALL/.boomserver/data/env/$USER.json &>/dev/null
+#  unset boomSiteUserJson tmp
+#fi
+
+bang() {
+  __doom 127 || return
+  local i
+  for (( i=0; i<${1:-1}; i++ )); do echo -n ${_BE_BOOM}; done; echo
+}
+
+__boommeter() {
+  __boomcmdno BOOM_CMDNO
+  if [[ "$_SILENTBOOM" == "yes" ]]; then
+    __boommeterrunner &>/dev/null
+    BOOMPREV_HISTCMD=$HISTCMD
+    BOOMPREV_CMDNO=$BOOM_CMDNO
+    return 0
+  else
+    __boommeterrunner
+  fi
+
+  # Doom if doomed elsewhere - persistent doom
+  __doom persist
+
+  __handle_autoboombot
+
+  ## Handle features from other boom rc files
+  if __doom inactive; then
+  #  # boomsession imports
+  #  if declare -f _checkForBoomImports &>/dev/null; then _checkForBoomImports; fi
+  #  # boombar update
+  #  if [[ -n "$BOOMBARSTATE" ]] && declare -f boombar &>/dev/null; then
+  #    # Export tty
+  #    export BOOMBAR_TTY=$(readlink -f /proc/$$/fd/0)
+
+  #    # Set bar up for instant redraw
+  #    local prefcolor
+  #    prefcolor="[48;2;${BOOMBAR_PREF_RGBBG:-78;78;78}m"
+  #    printf "\033%s " "$prefcolor $_BE_BOT Loading the bar..." > $BOOMBARCONTENTFILE
+
+  #    # Print bar if on correct line
+  #    read -sdR -p $'\E[6n' cursorpos
+  #    cursorpos=${cursorpos#*\[} # line;col
+  #    if [[ "${cursorpos%;*}" == "$LINES" ]]; then boombar exit; boombar; fi
+  #  fi
+    :
+  fi
+  BOOMPREV_HISTCMD=$HISTCMD
+  BOOMPREV_CMDNO=$BOOM_CMDNO
+}
+__handle_autoboombot() {
+  if __doom inactive && __boomvar active AUTOBOOMBOT; then
+    if [[ "$(TZ=$BOOMTZ date -d @$(stat -c %Y $_boomBotModeBooms) +%d)" != "$(TZ=$BOOMTZ date +%d)" ]]; then
+      if __boomvar inactive BOOMBOTMODE; then
+        echo Automatically starting boombot mode
+        #_boombot
+      fi
+      return
+    fi
+    if __boomvar inactive BOOMBOTMODE && [[ ! " -1 -2 " =~ " $(cat $_boomBotModeBooms) " ]]; then
+      echo Automatically starting boombot mode
+      #_boombot
+    elif __boomvar active BOOMBOTMODE && [[ " -1 -2 " =~ " $(cat $_boomBotModeBooms) " ]]; then
+      #_boombot exit
+      echo Automatically exited boombot mode
+    fi
+  fi
+}
+
+__boommeterrunner() {
+  # This magic skips empty lines
+  if (( BOOM_CMDNO == BOOMPREV_CMDNO )); then return; fi
+  if [[ "$DOOMBOOM" == "yes" ]]; then return; fi
+
+  local cmd=$(fc -ln -1 | head -n 1 | awk '{print $1}')
+  #local lasttimeout=$(sed -ne "/$USER/ s/$USER //p" $_boomTimeout | tail -n 1)
+  #export BOOMTIMEDOUT=$([ $(($(TZ=$BOOMTZ date -u +%s)-${lasttimeout:-0})) -le $_BOOMDEFAULTTIMEOUT ] && echo yes || echo no)
+
+  # This is here because chat is in HISTIGNORE
+  if [[ "$(cat $_boomTracker)" =~ ^"_chat"$ ]]; then
+    cmd=chat
+  elif [[ "$(cat $_boomTracker)" =~ ^"chat"$ && "$BOOMPREV_HISTCMD" == "$HISTCMD" ]]; then
+    # Need this check bc chat is in HISTIGNORE
+    # This ensures a new command has been run
+    return
+  fi
+
+  # Repeated commands are not boomable
+  # Brief history of why:
+  #   Before offline patch 2.2.9, the last command was tracked by history alone
+  #   This meant that empty lines needed to be filtered by checking boomTracker
+  #   Now, empty lines are filtered out with BOOM_CMDNO and '\#' prompt evaluation
+  #   So, is boomTracker useless? Nope! boomTracker now serves the purpose of handling multi-terminal setups
+  #   If a command is run anywhere on a machine by the user, the command previously run in the current session
+  #     is eligible again, and boomTracker helps keep track of that
+  #   Ultimately, repeated commands could be boomable now, but they aren't because of developer preference
+  if [[ "$(cat $_boomTracker)" == "$cmd" ]]; then return; fi
+  if [[ -n "$cmd" ]]; then
+    echo "$cmd" > $_boomTracker
+
+    local odds=15
+    #[[ " everyone $USER " =~ " $(sed -n 1p $_boomFavor) " ]] && odds=10
+    local boomrandomizer=$(( RANDOM % odds + 1 ))
+
+    if (( boomrandomizer == 7 )); then
+      boommeter $cmd _log
+      local deaddrought=$(cat $_boomDrought)
+      echo -n "0" > $_boomDrought
+      #local currentrec=$(awk '{print $2}' <(grep "^ $USER " $_boomDroughtRecord))
+      #if (( deaddrought > currentrec )); then
+      #  sed -i -e "s/^ $USER $currentrec$/ $USER $deaddrought/" $_boomDroughtRecord
+      #  \chmod 777 $_boomDroughtRecord 2>/dev/null
+      #fi
+      #TODO: statcomp below?
+      #if [[ -n "$BOOMSTATTRACKING" ]]; then
+      #  local curryearrec=$(awk '{print $3}' <(grep "^ $USER " $_boomStatTracker))
+      #  if (( deaddrought > curryearrec )); then
+      #    _boomStatSet $USER 3 $deaddrought
+      #  fi
+      #fi
+
+      #local nofavor=
+      #[[ -n "$BOOMNOWEEKENDFAV" && " 0 6 " =~ " $(date +%w) " ]] && nofavor=y
+      #if [[ -w $_boomFavor ]]; then
+      #  # Reroll favorite each day
+      #  if [[ "$(TZ=$BOOMTZ date -d @$(stat -c %Y $_boomFavor) +%d)" != "$(TZ=$BOOMTZ date +%d)" && -z "$nofavor" ]]; then
+      #    local countuser
+      #    local newfav=$(
+      #    while read line; do
+      #      read -ra countuser <<< $line
+      #      for i in $(seq ${countuser[0]}); do
+      #        echo -n " ${countuser[1]}";
+      #      done
+      #    done < <(sed -n "2s/ /\n/gp" $_boomFavor | \grep [a-z] | sort | uniq -c | sed -e 's/[8-9"]/8/' -e 's/\([0-9]\)\{2,\}/8/g') |
+      #    xargs shuf -n1 -e)
+
+      #    if declare -f _boomgoal &>/dev/null && [[ ! "$(\cat $_boomGoal 2>/dev/null)" =~ "reshandled"$ ]]; then
+      #      local rewardstr=$(_boomgoal _reward_ 2>/dev/null)
+      #      [[ -n "$rewardstr" ]] && newfav="$rewardstr"
+      #    fi
+
+      #    echo -e "$newfav\n $USER" > $_boomFavor
+      #    [[ -n "$BOOMSTATTRACKING" ]] && _boomStatInc $newfav 4
+      #    echo boombot: $_BE_BOT BoomBot\'s favorite user today is $newfav! >> $_boommeterLog
+      #  else
+      #    # Add entry for favor drawing
+      #    sed -i "2 s/$/ $USER/" $_boomFavor
+      #  fi
+      #fi
+    else
+      local drought=$(( $(cat $_boomDrought) + 1 ))
+      echo -n "$drought" > $_boomDrought
+      if (( drought >= 70 && drought % 5 == 0 )); then
+        echo "$_BE_HOLE$_BE_HOLE$_BE_HOLE BOOM FAMINE! You haven't had a random boom in $drought commands! $_BE_HOLE$_BE_HOLE$_BE_HOLE"
+      elif (( drought >= 45 && drought % 5 == 0 )); then
+        echo "$_BE_HOLE$_BE_HOLE$_BE_HOLE BOOM DROUGHT! You haven't had a random boom in $(cat $_boomDrought) commands! $_BE_HOLE$_BE_HOLE$_BE_HOLE"
+      elif (( drought == 40 )); then
+        #echo "$_BE_HOLE🚨$_BE_HOLE DROUGHT WATCH! $USER is on course for a drought! $_BE_HOLE🚨$_BE_HOLE" >> $_boomUserLog
+        :
+      fi
+    fi
+    #if [[ "$BOOMBOTMODE" == "yes" ]]; then
+    #  local remark=$(_bbmRemark $cmd)
+    #  if [ -n "$BOOMBARSTATE" ]; then
+    #    declare -f _boombarenv &>/dev/null && _boombarenv BBMREMARK "${remark//" $_BE_HOLE"}" 2>/dev/null
+    #  else
+    #    echo $remark
+    #  fi
+    #elif [[ -n "$BOOMBARSTATE" && -f "/tmp/.boombar-bbmremark" ]]; then
+    #  rm /tmp/.boombar-bbmremark 2>/dev/null
+    #fi
+    #if [[ ${BOOMBOTCHATFREQ:-225} =~ [1-9]+ && $(( $RANDOM % ${BOOMBOTCHATFREQ:-225} )) -eq 25 ]]; then
+    #  echo boombot: $(_bbmRemark $cmd | sed -e "s/your/$USER's/g" -e "s/you/$USER/g") >> $_boommeterLog
+    #fi
+  fi
+  if [[ -n "$(cat $_boomNotify)" ]]; then
+    [[ -z "$BOOMBARSTATE" ]] && tail -n 2 $_boomNotify
+    echo -n "" > $_boomNotify
+  fi
+}
+boommeter() {
+  __doom 127 || return
+
+  # Single test for if this is a _log run
+  local logrun=false
+  [[ "$2" == "_log" ]] && logrun=true
+
+  # If command includes super problematic chars just exit
+  if $logrun && [[ "$1" =~ [![]+ ]]; then return; fi
+
+  # Adapted from Josh
+  if [[ -z "$1" ]]; then
+    echo "Give us something to rank on the boom meter!"
+    return 1
+  fi
+
+  local score=$(( RANDOM % 8 + 1 ))
+  local dispscore=$score
+  local result=""
+
+  # Quest reroll here so can disown
+  #__rerollquest() {
+  #  local cmds=()
+  #  local minusers=$(($(wc -l <$_boomUsers)/2+1))
+  #  while read user; do
+  #    local rankfile=/$BOOMUSERDIR/$user/$BOOMINSTALL/.boomrankings
+  #    if [ ! -r "$rankfile" ]; then continue; fi
+  #    while read line; do
+  #      cmds+=($(echo $line | awk '{print $1}'))
+  #    done < $rankfile
+  #  done < $_boomUsers
+  #  # Assumes under 19 users
+  #  cmds=($(echo "${cmds[@]}" | sed -e 's/ /\n/g' | sort | uniq -c | grep "^[ ]\+[$minusers-9]" | awk '{print $2}'))
+  #  if [[ ${#cmds[@]} -gt 0 ]]; then
+  #    openssl dgst -sha256 <<<"${cmds[$RANDOM % ${#cmds[@]}]}" | awk '{print $2}' > $_boomQuest
+  #    echo "boombot: $_BE_BOT A new boom quest is active!" >> $_boommeterLog
+  #  fi
+  #}
+  local mult
+  #if $logrun; then
+  #  if [ "$(cat $_boomQuest)" == "$(openssl dgst -sha256 <<<"$1" | awk '{print $2}')" ]; then
+  #    __rerollquest & disown
+  #    mult=2
+  #  fi
+  #  if [ "$(TZ=$BOOMTZ date -d @$(stat -c %Y $_boomQuest) +%d)" != "$(TZ=$BOOMTZ date +%d)" ]; then
+  #    __rerollquest & disown
+  #  fi
+  #fi
+  #unset -f __rerollquest &>/dev/null
+  #if [[ -n "$mult" ]]; then
+  #  echo "Congratulations! You completed the boom quest!"
+  #  [[ -n "$BOOMSTATTRACKING" ]] && _boomStatInc $USER 11
+  #fi
+
+  local boomtotal
+  if [[ -r "$_boomRankings" ]]; then
+    # Mult if boomed total%25=24 times (on 25th boom)
+    boomtotal=$(($(wc -w <$_boomRankings)-$(wc -l <$_boomRankings)))
+  else
+    boomtotal=0
+  fi
+  if $logrun && [[ "$(($boomtotal%25))" == "24" && "$1" =~ ^[^!./[\"\']+$ ]]; then
+    mult=$((${mult:-1}*2))
+    echo "Congratulations! You have boomed $(($boomtotal+1)) times!"
+  fi
+
+  # Mult if boom drought ended
+  #TODO: fix this NEXT
+  if $logrun && [[ "$(cat $_boomDrought)" -ge "45" ]]; then
+    mult=$((${mult:-1}*2))
+    echo "Congratulations! Your drought was $(cat $_boomDrought) commands long!"
+    [[ -n "$BOOMSTATTRACKING" ]] && _boomStatInc $USER 9
+  fi
+
+  # Mult if boombot mode used
+  if $logrun && [[ "$(cat $_boomBotModeBooms)" == "-2" ]]; then
+    mult=$((${mult:-1}*2))
+    echo "Congratulations! BoomBot has rewarded you with a SUPER boom!"
+    echo -n "-1" > $_boomBotModeBooms
+    [[ -n "$BOOMSTATTRACKING" ]] && _boomStatInc $USER 10
+  fi
+
+  if (( score > 5 )); then
+    score=5
+    dispscore=5
+  fi
+  if (( (RANDOM % 500 + 1) == 365 )); then
+    score=6
+    dispscore=6
+    if $logrun; then
+      #echo " $USER $(TZ=$BOOMTZ date -u +%s) $1" >> $_boomHoF
+      #echo "$(bang 3) 6 BIG BOOMS - Welcome to the BOOM hall! $(bang 3)" >> $_boomUserLog
+      [[ -n "$BOOMSTATTRACKING" ]] && _boomStatInc $USER 5
+    fi
+  fi
+  if [[ -n "$mult" ]]; then
+    #echo "$_BE_BOOM$_BE_SUPER$_BE_BOOM $USER earned a SUPER boom with ${dispscore}x$mult booms on $1! $_BE_BOOM$_BE_SUPER$_BE_BOOM" >> $_boomUserLog
+    [[ -n "$BOOMSTATTRACKING" ]] && _boomStatInc $USER 7
+  fi
+  score=$((score*${mult:-1}))
+
+  local i
+  for (( i=0; i<score; i++ )); do
+    result+="$_BE_BOOM"
+  done
+
+  local term
+  if $logrun; then
+    declare -f _boombarenv &>/dev/null && _boombarenv LASTBOOM $score $1 2>/dev/null
+    declare -f _boomgoal &>/dev/null && _boomgoal _inc_ $score 2>/dev/null & disown # disown in case takes a while
+    if [[ "$1" =~ ^[^!/.[\"\']+$ ]]; then
+      __boomlog $1 $score
+      term="${1//\\}"
+    fi
+  elif [[ "$1" == "_bot" ]]; then term="${@:2}"
+  else term="$@"
+  fi
+
+  local plural=""
+  (( score > 1 )) && plural="s"
+  if [[ "$1" == "_bot" ]]; then
+    echo "$_BE_BOT BoomBot thinks $term is $score big boom${plural}! $result"
+    return
+  fi
+  local prefix="Let's rank it on the"
+  $logrun && prefix=Random
+  echo "$prefix ${mult:+SUPER }boom meter! $term gets ${dispscore}${mult:+x$mult} big boom${plural}! $result"
+  if ! $logrun; then
+  #  echo "$USER's ranking it on the boom meter! $term gets $score big boom${plural}! $result" >> $_boommeterLog
+    :
+  fi
+  if [[ ! "$term" =~ "/" && -f "$_boomRankings" ]]; then
+    grep -q "^ $term " $_boomRankings && __boomavg $term
+  fi
+  if $logrun && [[ -f "$_boomStreak" ]]; then __boomhog $term; fi
+  if $logrun && __boomvar active BOOMBOTMODE; then _bbmHandler $score; fi
+}
+
+###Function doommeter
+# "\t${B}doommeter${N} THING";
+# "\t\tthis function ranks THING on the doommeter...";
+###
+doommeter() {
+  __doom 127 || return
+
+  if [ -z "$1" ]; then
+    echo "Give us something to rank on the doom meter..."
+    return 1
+  fi
+
+  local score=$(( RANDOM % 8 - 2 ))
+  local result=""
+
+  (( score < 1 )) && score=1
+
+  local i
+  for (( i=0; i<score; i++ )); do
+    result+="$_BE_HOLE"
+  done
+
+  local plural=""
+  (( score > 1 )) && plural="s"
+  echo "Let's rank it on the doom meter... $@ gets $score big doom${plural}. $result"
+  #echo "$USER's ranking it on the doom meter... $@ gets $score big doom${plural}. $result" >> $_boommeterLog
+}
+
+###Function boomavg
+# "\t${B}boomavg${N} [CMD]";
+# "\t\tthis function prints your average rank and total booms for every command!";
+# "\t\tif CMD arg present, function will only print avg for CMD";
+###
+boomavg() {
+  __doom 127 || return
+
+  if [[ -n "$1" ]]; then
+    if [[ -n "$(_boomavg $1)" ]]; then __boomavg "$1"
+    else echo "$1 not found in averages!"; fi
+  else
+    #TODO: better way here?
+    while read line; do
+      __boomavg ${line[0]}
+    done < $_boomRankings
+  fi
+}
+__gs_boom_action() {
+  local action args trash
+  local cmd ranking
+  local line
+
+  read -r action args <<<"$@"
+  case _${action}_ in
+    _RANK_)
+      read -r cmd ranking trash <<<"$args"
+      __gs_required_args -q cmd ranking && line="$action $cmd $ranking"
+    ;;
+  esac
+  [[ -n "$line" ]] && echo "$line" >> $_boomActionCache
+}
+
+__boomlog() {
+  local cmd="${1//\\}"
+
+  # Extra filter to be safe (for a while this was single-handedly saving us)
+  [[ "$cmd" =~ [!./[\"\']+ ]] && return
+
+  __gs_boom_action RANK "$cmd" "$2"
+
+  # Create rankings if non-existent
+  if [[ ! -f "$_boomRankings" ]]; then
+    echo " $cmd $2" > $_boomRankings
+    command chmod 644 $_boomRankings &>/dev/null
+    return
+  fi
+
+  local exists=$(sed -ne "/^ $cmd /p" $_boomRankings)
+  if [[ -n "$exists" ]]; then
+    sed -i "/^ $cmd / s|$| $2|" $_boomRankings
+  else
+    sed -i "$ a \ $cmd $2" $_boomRankings
+  fi
+  #echo $USER boomed $cmd for $2 boom$([ $2 -gt 1 ] && echo s)${3:+ on $3}! >> $_boomUserLog
+}
+__boomavg() {
+  local sum count avg
+  grep -q "^ $1 " $_boomRankings || return
+  for num in $(sed -n "s|^ $1 ||p" $_boomRankings); do
+    sum=$((sum+num))
+    count=$((count+1))
+  done
+  __gs_calc -d 2 -r avg "$sum/$count"
+
+  local plural=""
+  (( count > 1 )) && plural="s"
+  echo "$1 has an average of $avg booms after $count hit${plural}!"
+}
+__boomhog() {
+  if [[ "$(cat $_boomStreak) " =~ " $1 " ]]; then
+    echo -n " $1" >> $_boomStreak
+  else
+    echo -n " $1" > $_boomStreak
+    command chmod 644 $_boomStreak &>/dev/null
+  fi
+
+  local streak=$(wc -w <$_boomStreak)
+  if (( streak >= 2 )); then
+    echo $_BE_BOOM$_BE_HOG$_BE_BOOM BOOM HOG! $1 is on a random boom streak of $streak in a row! $_BE_BOOM$_BE_HOG$_BE_BOOM
+    #echo $_BE_BOOM$_BE_HOG$_BE_BOOM BOOM HOG! $USER\'s $1 hit a random boom streak of $streak! $_BE_BOOM$_BE_HOG$_BE_BOOM >> $_boomUserLog
+  fi
+  [[ -n "$BOOMSTATTRACKING" ]] && _boomStatComp $USER 13 $streak
+}
+
+__gs_boom_comp() {
+  return 1
+}
+__gs_source_template boom-completion
+

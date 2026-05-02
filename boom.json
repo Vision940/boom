@@ -1,0 +1,9 @@
+{
+  "version": "0.0.0",
+  "min_bash": 4.4,
+  "cmd_name": "boominit",
+  "full_name": "Boom",
+  "has_main": false,
+  "default_cmd": "boom _init_",
+  "imports": []
+}

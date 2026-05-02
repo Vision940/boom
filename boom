@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+
+#TODO: docs
+# This is a morale boost tool that can be used to track productivity, introduce people to new commands, and create excitement in the work environment #
+
+# This is a rewrite of the original filesystem based boom for gameserver compatibility
+
+__boom_required_fxns() {
+  __gs_required_fxns $@
+  local ret=$?
+  (( ret != 0 )) && {
+    __gs_errormsg "Boom has not been initialized"
+    __gs_errormsg "Run \`boominit\` and try this again!"
+  }
+  return $ret
+}
+
+boom() {
+  __gs_setdebug $1 || shift
+
+  local action="${1:-empty}"
+  case _${action}_ in
+    _avg_) : See command averages
+      echo To be implemented!
+    ;;
+    _board_) : View boom boards
+      echo To be implemented!
+    ;;
+    _chat_) : Post to boom chat
+      echo To be implemented!
+    ;;
+    __init__) : Bring the boom!
+      __gs_source_file config boom || return 1
+      __gs_required_args -nd BOOMINSTALL || {
+        __gs_errormsg "Boom config not set up or invalid" fatal
+        __gs_errormsg "Please configure the boom correctly before source" fatal
+        return 1
+      }
+
+      __gs_source_file static/init-simple boom || return 1
+
+      echo I am bringing the boom!
+      [[ ! "$PROMPT_COMMAND" =~ "__boommeter" ]] && PROMPT_COMMAND="__boommeter${PROMPT_COMMAND:+"; $PROMPT_COMMAND"}"
+    ;;
+    _meter_) : Rank on the boom meter
+      __boom_required_fxns boommeter __boommeter_roll || return 1
+      boommeter "${@:2}"
+    ;;
+    *)
+      if declare -f game &>/dev/null; then
+        game $@
+      else
+        __gs_errormsg "Option $1 not found."
+        __gs_infomsg "Run \`${FUNCNAME[-1]} help\` for help!"
+        return 1
+      fi
+    ;;
+  esac
+}
+
+__gs_boom_comp() {
+  return 1
+}
+__gs_source_template boom-completion
+

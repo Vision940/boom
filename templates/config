@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+{% for key, value in config_vals.items() %}
+readonly {{ key }}="{{ value }}" &>/dev/null
+{% endfor %}
+
+return 0
+
