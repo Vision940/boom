@@ -13,8 +13,12 @@ from flask import (
 from jinja2 import TemplateNotFound
 
 from imports import json
+from imports.game_objs import GameHandler
 
 bp = Blueprint("boom", __name__, url_prefix="/boom", template_folder="templates", static_folder="static")
+
+# Get game handler object to use server capabilities
+BOOM_GAME = GameHandler(__name__)
 
 
 ## Functions ##

@@ -139,17 +139,20 @@ bang() {
 
 __boom_action() {
   local action args trash
-  local cmd ranking
   local line
 
   read -r action args <<<"$@"
   case _${action}_ in
     _RANK_)
-      read -r cmd ranking trash <<<"$args"
-      __gs_required_args -q cmd ranking && line="$action $cmd $ranking"
+      local cmd ranking multiplier odds host import quest drought
+      read -r cmd ranking multiplier odds host import quest drought trash <<<"$args"
+      __gs_required_args -q cmd ranking && line="$action $cmd $ranking ${multiplier:-1} ${odds:-15} ${host:-${HOSTNAME:-unknown}} ${import:-FALSE} ${quest:-FALSE}${drought:+ $drought}"
     ;;
     _CHATLOG_) ;&
     _BOOMLOG_)
+      #TODO: BOOMLOG should just be derived from base principles in the backend once db is populated
+      #TODO: CHATLOG should use gameserver chat feature with a 'boom' room
+      #TODO: chat timeout table with chat feature or maybe install wide user timeouts
       local phrase="$args"
       __gs_required_args -q phrase && line="$action $phrase"
     ;;
@@ -190,6 +193,7 @@ __boommeter_roll() {
     __bot__) prefix="BoomBot thinks " ;;
   esac
 
+  #TODO: detect supers here
   local score=$(( RANDOM % 8 + 1 ))
   (( score > 5 )) && score=5
   (( RANDOM % 500 == 365 )) && score=6
@@ -211,20 +215,37 @@ __boommeter_roll() {
     ;;
     __log__)
       echo "${prefix}$cmd $suffix"
-      __boomlog "$cmd" "$score"
+      __boomlog "$cmd" "$score" #TODO: mult
     ;;
   esac
 }
 __boomlog() {
+  #TODO: read mult, host, odds?, quest, drought, and whatever else with read from args 3+
   local cmd="$1" score="$2" host="$3"
   local plural=""
-  (( score > 1 )) && plural="s"
+
+  #TODO: super boom mult should be passed in
+  local mult=1
+  (( score*mult > 1 )) && plural="s"
+
+  #TODO: favorite odds
+  local odds=15
+
+  #TODO: boom drought
+  local drought=0
+
+  #TODO: boom quest
+  local quest=FALSE
 
   # Log boom event to site
-  __boom_action BOOMLOG "$GS_USER boomed $cmd for $score boom${plural}${host:+ on $host}!"
+  __boom_action BOOMLOG "$GS_USER boomed $cmd for $((score*mult)) boom${plural}${host:+ on $host}!"
+
+  # Boom is an import if host is populated here
+  local import=FALSE
+  [[ -n "$host" ]] && import=TRUE
 
   # Log ranking if no problematic chars
-  [[ "$1" =~ ^[^!/.[\"\']+$ ]] && __boom_action RANK "$cmd" "$score"
+  [[ "$1" =~ ^[^!/.[\"\']+$ ]] && __boom_action RANK "$cmd" "$score" "$mult" "$odds" "${host:-${HOSTNAME:-unknown}}" "$import" "$quest" "$drought"
 }
 
 boommeter() {

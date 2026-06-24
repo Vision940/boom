@@ -3,6 +3,7 @@
   "min_bash": 4.4,
   "cmd_name": "boominit",
   "full_name": "Boom",
+  "db_migrations": true,
   "has_main": false,
   "default_cmd": "boom _init_",
   "imports": []

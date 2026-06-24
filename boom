@@ -39,7 +39,10 @@ boom() {
 
       __gs_source_file static/init-simple boom || return 1
 
-      echo I am bringing the boom!
+      if [[ ${FUNCNAME[-1]} == boominit ]]; then
+        echo $_BE_BOOM$_BE_BOOM We bring the boom! $_BE_BOOM$_BE_BOOM
+      fi
+
       [[ ! "$PROMPT_COMMAND" =~ "__boommeter" ]] && PROMPT_COMMAND="__boommeter${PROMPT_COMMAND:+"; $PROMPT_COMMAND"}"
     ;;
     _meter_) : Rank on the boom meter

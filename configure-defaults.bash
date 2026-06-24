@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+#TODO: run this in server install
+
 template="install-config.json-template"
 genCfg="${template%-template}"
 idx=0
