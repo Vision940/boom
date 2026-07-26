@@ -12,13 +12,30 @@ from flask import (
 )
 from jinja2 import TemplateNotFound
 
-from imports import json
-from imports.game_objs import GameHandler
 
-bp = Blueprint("boom", __name__, url_prefix="/boom", template_folder="templates", static_folder="static")
+from server.api.api import Api
+from server.funcs import json
+from server.games.context import GameContext
 
-# Get game handler object to use server capabilities
-BOOM_GAME = GameHandler(__name__)
+
+# Create game context object to use server capabilities
+BOOM_GAME = GameContext(__name__)
+
+# Create game blueprint
+bp = Blueprint("boom", __name__, url_prefix="/boom", template_folder="../templates", static_folder="../static")
+
+# Register blueprints to game
+api_routes = [
+    "action"
+]
+api = Api(
+   *api_routes,
+    name="boom-api",
+    path=f"{__package__}.api",
+    origin="boom",
+    version=BOOM_GAME.config.version
+)
+api.register_api(bp)
 
 
 ## Functions ##
