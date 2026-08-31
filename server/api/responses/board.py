@@ -1,7 +1,7 @@
 from server.api.responses.base import respdataclass, ApiResp
 
+
 @respdataclass
-class BoomActionSyncResp(ApiResp):
-    inserted: int
-    duplicate: int
+class BoomBoardResp(ApiResp):
+    board: dict
 

@@ -1,7 +1,8 @@
 from server.api.responses.base import respdataclass, ApiResp
 
+
 @respdataclass
-class BoomActionSyncResp(ApiResp):
-    inserted: int
-    duplicate: int
+class BoomDroughtLongestResp(ApiResp):
+    longest: int
+    user: str
 

@@ -2,6 +2,7 @@
 CREATE TABLE boom_command_rankings (
   id BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  action_id UUID NOT NULL UNIQUE,
 
   command TEXT NOT NULL,
   ranking SMALLINT NOT NULL CHECK (ranking >= 1 AND ranking <= 6),
@@ -25,6 +26,17 @@ ON boom_command_rankings (command);
 
 CREATE INDEX idx_boom_rankings_boomed_at
 ON boom_command_rankings (boomed_at);
+
+-- boom drought longest tracking table
+CREATE TABLE boom_current_droughts (
+    user_id BIGINT PRIMARY KEY
+        REFERENCES users(id) ON DELETE CASCADE,
+
+    drought INTEGER NOT NULL CHECK (drought >= 0),
+
+    observed_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- boom drought record view built from commands
 CREATE VIEW boom_highest_droughts AS
@@ -68,12 +80,14 @@ GROUP BY b.user_id;
 $$;
 
 -- boom hall table to store all times users have hit 6/5 big booms
-CREATE TABLE boom_hall (
-  id BIGSERIAL PRIMARY KEY,
-  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  command TEXT NOT NULL,
-  boomed_at TIMESTAMPTZ NOT NULL
-);
+CREATE VIEW boom_hall AS
+SELECT
+    id,
+    user_id,
+    command,
+    boomed_at
+FROM boom_command_rankings
+WHERE ranking = 6;
 
 -- boom avg/freq stats per command per user
 CREATE VIEW boom_command_stats AS

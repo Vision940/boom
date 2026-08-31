@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+
+## Functions
+__boom_drought() {
+  local action="$1"
+  case _${action}_ in
+    _get_) export REPLY=$(command cat $_boomDrought) ;;
+    _reset_) printf "0" > $_boomDrought ;;
+    _increment_)
+      local drought=$(( $(command cat $_boomDrought) + 1 ))
+      printf "$drought" > $_boomDrought
+    ;;
+    _message_)
+      local drought=$(command cat $_boomDrought)
+      if (( drought >= 70 && drought % 5 == 0 )); then
+        echo "$_BE_HOLE$_BE_HOLE$_BE_HOLE BOOM FAMINE! You haven't had a random boom in $drought commands! $_BE_HOLE$_BE_HOLE$_BE_HOLE"
+      elif (( drought >= 45 && drought % 5 == 0 )); then
+        echo "$_BE_HOLE$_BE_HOLE$_BE_HOLE BOOM DROUGHT! You haven't had a random boom in $(cat $_boomDrought) commands! $_BE_HOLE$_BE_HOLE$_BE_HOLE"
+      elif (( drought == 40 )); then
+        __boom_action save BOOMLOG "$_BE_HOLE🚨$_BE_HOLE DROUGHT WATCH! $USER is on course for a drought! $_BE_HOLE🚨$_BE_HOLE"
+      fi
+    ;;
+    _sync_)
+      # Ensure server is pinging
+      __gs_ping || return 0
+
+      local drought=$(command cat $_boomDrought)
+      local now=${EPOCHSECONDS:-$(date +%s)}
+      __gs_curl_post api/boom/drought msgType sync drought $drought epochSeconds "$now" || return
+    ;;
+    _longest_)
+      local response
+      response="$(__gs_curl_post api/boom/drought msgType longest)" || {
+        __gs_errormsg "Could not communicate with server"
+        return 1
+      }
+      local longest=$(__gs_parse_response ".longest // 0" "$response")
+      local winner=$(__gs_parse_response '.user // "nobody"' "$response")
+      echo "$_BE_BOOM$_BE_HOLE $winner has the longest drought after $longest boomless commands! $_BE_HOLE$_BE_BOOM"
+    ;;
+    _me_)
+      echo You haven\'t hit a random boom in $(command cat $_boomDrought) commands!
+    ;;
+    _rarity_)
+      local len=$2
+      local droughtodds=${3:-15}
+      local bonusstr=
+      local chance
+
+      # Using approximate bash calc instead of bc just 'cause really
+      __gs_calc -r chance -p "(($((droughtodds-1))/$droughtodds)^$len)*100"
+
+      (( droughtodds == 10 )) && bonusstr=" with favorite odds"
+      echo "A drought of $len has a ${chance:0:6}% chance of happening${bonusstr}"
+    ;;
+  esac
+}
+
+__boom_drought_case() {
+  local action="$1"
+  case _${action}_ in
+    _longest_) : See current longest drought
+      __boom_drought longest
+    ;;
+    _rarity_) : Calculate drought rarities
+      local evalarg=3 odds=15
+      [[ "$2" == "fav" ]] && evalarg=4 odds=10
+
+      [[ -z "${!evalarg}" || ! "${!evalarg}" =~ ^[0-9]+$ ]] && {
+        echo Enter drought length to calculate
+        return
+      }
+      __boom_drought rarity ${!evalarg} $odds
+    ;;
+    __) : See your current drought
+      __boom_drought me
+    ;;
+    *) __gs_unfound_option "drought $1" ;;
+  esac
+}
+
+## Completion
+__gs_source_template __boom_drought_case-completion
+__gs___boom_drought_case_comp() {
+  if (( COMP_CWORD >= 2 )); then
+    case "${COMP_WORDS[0]}_${COMP_WORDS[1]}" in
+      drought_rarity)
+        (( COMP_CWORD > 2 )) && return
+        COMPREPLY=($(compgen -W "fav" -- "$2"))
+      ;;
+    esac
+    return 0
+  fi
+  return 1
+}
+

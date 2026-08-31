@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+
+bang() {
+  __doom 127 || return
+  local i
+  for (( i=0; i<${1:-1}; i++ )); do echo -n ${_BE_BOOM}; done; echo
+}
+
+__boommeter() {
+  __gs_logged_in || return
+  [[ "$BOOM_USER" == "$GS_USER" ]] || return
+  __doom persist
+  __doom active && return
+
+  # This magic skips empty lines
+  __boomcmdno BOOM_CMDNO
+  (( BOOM_CMDNO == BOOMPREV_CMDNO )) && return
+
+  local cmd=$(fc -ln -1 | head -n 1 | awk '{print $1}')
+  cmd="${cmd//\\}"
+  [[ "$BOOMPREV_CMD" == "$cmd" ]] && return
+
+  if [[ -n "$cmd" ]]; then
+    local odds=15
+    if (( RANDOM % odds == 7 )); then
+      __boommeter_roll "$cmd" _log_
+    else
+      __boom_drought increment
+      __boom_drought message
+    fi
+  fi
+
+  __boom_action sync &>/dev/null & disown
+  __boom_drought sync &>/dev/null & disown
+
+  BOOMPREV_HISTCMD=$HISTCMD
+  BOOMPREV_CMDNO=$BOOM_CMDNO
+  BOOMPREV_CMD="$cmd"
+}
+
+__boommeter_roll() {
+  local cmd="$1"
+  local runner="$2"
+
+  local prefix="Let's rank it on the boom meter! "
+  case _${runner}_ in
+    __log__)
+      [[ "$cmd" =~ [!./[\"\']+ ]] && return
+      prefix="Random boom meter! "
+    ;;
+    __bot__) prefix="BoomBot thinks " ;;
+  esac
+
+  #TODO: detect supers here
+  local score=$(( RANDOM % 8 + 1 ))
+  (( score > 5 )) && score=5
+  (( RANDOM % 500 == 365 )) && score=6
+
+  local plural=""
+  (( score > 1 )) && plural="s"
+
+  local emojis="$(bang $score)"
+  local suffix="gets $score big boom${plural}! $emojis"
+
+  case _${runner}_ in
+    __bot__)
+      __boom_action save CHATLOG "${prefix}$cmd ${suffix/gets/is}"
+    ;;
+    __cmd__)
+      echo "${prefix}$cmd $suffix"
+      prefix="$GS_USER is ranking it on the boom meter! "
+      __boom_action save CHATLOG "${prefix}$cmd $suffix"
+    ;;
+    __log__)
+      echo "${prefix}$cmd $suffix"
+      __boomlog "$cmd" "$score" #TODO: mult
+      (( score == 6 )) &&
+        __boom_action save BOOMLOG "$(bang 3) 6 BIG BOOMS - Welcome to the BOOM hall! $(bang 3)"
+    ;;
+  esac
+}
+
+__boomlog() {
+  #TODO: read mult, host, odds?, quest, drought, and whatever else with read from args 3+
+  local cmd="$1" score="$2" host="$3"
+  local plural=""
+
+  #TODO: super boom mult should be passed in
+  local mult=1
+  (( score*mult > 1 )) && plural="s"
+
+  #TODO: favorite odds
+  local odds=15
+
+  local drought
+  if [[ ! -n "$host" ]]; then
+    __boom_drought get
+    drought=$REPLY
+    __boom_drought reset
+  fi
+
+  #TODO: boom quest
+  local quest=FALSE
+
+  # Boom is an import if host is populated here
+  local import=FALSE
+  [[ -n "$host" ]] && import=TRUE
+
+  # Log ranking if no problematic chars
+  [[ "$1" =~ ^[^!/.[\"\']+$ ]] && __boom_action save RANK "$cmd" "$score" "$mult" "$odds" "${host:-${HOSTNAME:-unknown}}" "$import" "$quest" "$drought"
+}
+
+boommeter() {
+  __doom 127 || return
+  local phrase="$*"
+  if [[ -n "$phrase" ]]; then
+    __boommeter_roll "$phrase" _cmd_
+  else
+    echo "Give us something to rank on the boom meter!"
+  fi
+}
+

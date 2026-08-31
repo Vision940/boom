@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+
+# Set file vars
+__gs_xdg_dir state boom/actions
+_boomActionCache="$GS_STATE_DIR/boom/actions/cache"
+_boomActionPending="$GS_STATE_DIR/boom/actions/pending"
+_boomActionLock="$GS_STATE_DIR/boom/actions/.action.lock"
+_boomSyncLock="$GS_STATE_DIR/boom/actions/.sync.lock"
+_boomDrought="$GS_STATE_DIR/boom/drought"
+_doomTracker="$GS_STATE_DIR/boom/.doomtracker"
+
+# Init files
+: > $_boomActionLock
+: > $_boomSyncLock
+[[ ! -f "$_boomDrought" ]] && printf "0" > $_boomDrought
+[[ ! -f "$_doomTracker" ]] && : > $_doomTracker
+
+# This is how we tell what command we are on (and why we need bash 4.4+)
+readonly BOOM_MAGICPROMPT='\#' &>/dev/null
+
+BOOM_USER=$GS_USER
+DOOMBOOM=$(command cat $_doomTracker)
+
+# Starts at -1 to preserve legacy (pre offline-2.2.9) "feature" of booming on terminal start
+BOOMPREV_CMDNO=-1
+BOOMPREV_HISTCMD=$HISTCMD # int currrent cmd num in history
+BOOMPREV_CMD=
+
+__gs_unset_vars_from_prefixes _BE_
+
+# Set default emojis
+_BE_BOOM_DEF="💥"
+_BE_HOLE_DEF="🕳️"
+_BE_BOT_DEF="🤖"
+_BE_SUPER_DEF="⚡️"
+_BE_HOG_DEF="🐷"
+_BE_IMPORT_DEF="⬇️"
+_BE_EXPORT_DEF="⬆️"
+_BE_CHECK_DEF="✅"
+
+# Overwrite defaults with custom if defined
+_BE_BOOM="${BOOM_EMOJI:-$_BE_BOOM_DEF}"
+_BE_HOLE="${HOLE_EMOJI:-$_BE_HOLE_DEF}"
+_BE_BOT="${BOT_EMOJI:-$_BE_BOT_DEF}"
+_BE_SUPER="${SUPER_EMOJI:-$_BE_SUPER_DEF}"
+_BE_HOG="${HOG_EMOJI:-$_BE_HOG_DEF}"
+_BE_IMPORT="${IMPORT_EMOJI:-$_BE_IMPORT_DEF}"
+_BE_EXPORT="${EXPORT_EMOJI:-$_BE_EXPORT_DEF}"
+_BE_CHECK="${CHECK_EMOJI:-$_BE_CHECK_DEF}"
+
+__goodEmoji() {
+  # Really just making sure emojis aren't terrible chars
+  local s="$1"
+  local exitCode=0
+
+  # Reject empty just in case
+  [[ -z "$s" ]] && exitCode=1
+
+  # Reject any whitespace
+  [[ "$s" == *[[:space:]]* ]] && exitCode=2
+
+  # Reject any ASCII control characters
+  LC_ALL=C printf '%s' "$s" | grep -q '[[:cntrl:]]' && exitCode=3
+
+  # Reject shell metacharacters
+  [[ "$s" == *[\`\"\'\\\$]* ]] && exitCode=4
+
+  # Reject long strings
+  (( ${#s} >= 3 )) && exitCode=5
+
+  if (( exitCode != 0 )); then
+    __gs_errormsg "$s is an invalid emoji, ignoring with exit code $exitCode..."
+  fi
+
+  return $exitCode
+}
+
+# Reset to defaults if bad
+__goodEmoji "$_BE_BOOM" || _BE_BOOM="$_BE_BOOM_DEF"
+__goodEmoji "$_BE_HOLE" || _BE_HOLE="$_BE_HOLE_DEF"
+__goodEmoji "$_BE_BOT" || _BE_BOT="$_BE_BOT_DEF"
+__goodEmoji "$_BE_SUPER" || _BE_SUPER="$_BE_SUPER_DEF"
+__goodEmoji "$_BE_HOG" || _BE_HOG="$_BE_HOG_DEF"
+__goodEmoji "$_BE_IMPORT" || _BE_IMPORT="$_BE_IMPORT_DEF"
+__goodEmoji "$_BE_EXPORT" || _BE_EXPORT="$_BE_EXPORT_DEF"
+__goodEmoji "$_BE_CHECK" || _BE_CHECK="$_BE_CHECK_DEF"
+unset -f __goodEmoji
+
+__boomcmdno() {
+  export $1=$(printf '%s' "${BOOM_MAGICPROMPT@P}")
+}
+
+__boomvar() {
+  local action="$1" var="$2"
+  case _${action}_ in
+    _activate_)
+      export $var="yes"
+    ;;
+    _deactivate_)
+      export $var=
+    ;;
+    _active_)
+      [[ "${!var}" == "yes" ]]
+      return
+    ;;
+    _inactive_)
+      [[ "${!var}" != "yes" ]]
+      return
+    ;;
+  esac
+}
+
+__doom() {
+  local action="$1"
+  case _${action}_ in
+    _127_)
+      if __doom active; then
+        echo bash: ${FUNCNAME[-1]}: command not found
+        return 127
+      fi
+      return 0
+    ;;
+    _activate_) ;&
+    _active_) ;&
+    _deactivate_) ;&
+    _inactive_)
+      __boomvar $action DOOMBOOM
+      return
+    ;;
+    _persist_)
+      if [[ -w "$_doomTracker" ]] && __doom tracker-oos; then
+        if [[ "$(command cat $_doomTracker 2>/dev/null)" =~ "yes" ]]; then
+          clear
+        else
+          bringtheboom
+        fi
+        DOOMBOOM=$(command cat $_doomTracker)
+      fi
+    ;;
+    _tracker-oos_)
+      # Is the tracker out of state?
+      [[ "$(command cat $_doomTracker 2>/dev/null)" != "$DOOMBOOM" ]]
+      return
+    ;;
+    _tracker-set_)
+      printf '%s' "$DOOMBOOM" > $_doomTracker
+      return
+    ;;
+  esac
+}
+
+doom() {
+  __doom 127 || return
+  command -v doombot && doombot
+  __doom activate
+  clear
+  __doom tracker-oos && __doom tracker-set
+}
+
+bringtheboom() {
+  __doom deactivate
+  __boomvar deactivate AUTOBOOMBOT
+  echo $_BE_BOOM$_BE_BOOM WE BRING THE BOOM! $_BE_BOOM$_BE_BOOM
+  __doom tracker-oos && __doom tracker-set
+}
+

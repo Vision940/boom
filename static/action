@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+
+__boom_action() {
+  local method action args trash
+  local line
+
+  read -r method action args <<<"$@"
+  case _${method}_ in
+    _save_)
+      case _${action}_ in
+        _RANK_)
+          local cmd ranking multiplier odds host import quest drought
+          read -r cmd ranking multiplier odds host import quest drought trash <<<"$args"
+          __gs_required_args -q cmd ranking && line="$action $cmd $ranking ${multiplier:-1} ${odds:-15} ${host:-${HOSTNAME:-unknown}} ${import:-FALSE} ${quest:-FALSE}${drought:+ $drought}"
+        ;;
+        _CHATLOG_) ;&
+        _BOOMLOG_)
+          #TODO: CHATLOG should use gameserver chat feature with a 'boom' room
+          #TODO: chat timeout table with chat feature or maybe install wide user timeouts
+          local phrase="$args"
+          __gs_required_args -q phrase && line="$action $phrase"
+        ;;
+      esac
+      local now=${EPOCHSECONDS:-$(date +%s)}
+      local uuid=$(uuidgen)
+      {
+        flock -x 9 || return
+        [[ -n "$line" ]] && printf '%s %s %s\n' "$uuid" "$now" "$line" >> $_boomActionCache
+      } 9>>"$_boomActionLock"
+    ;;
+    _sync_)
+      local checksum trash
+      {
+        # Ensure no other sync process is running
+        flock -xn 8 || return 0
+
+        # Ensure server is pinging
+        __gs_ping || return 0
+
+        # Handle pre-existing pending sync
+        if [[ -s "$_boomActionPending" ]]; then
+          checksum=$(xxhsum -H0 "$_boomActionPending") || return
+          read -r checksum trash <<<"$checksum"
+          __gs_curl_post -f api/boom/action msgType sync file "@$_boomActionPending" checksum "$checksum" || return
+          command rm "$_boomActionPending" || return
+        fi
+
+        # Lock action file, move to pending, and recreate
+        {
+          flock -x 9 || return
+          [[ -s "$_boomActionCache" ]] || return 0
+          command mv "$_boomActionCache" "$_boomActionPending" || return
+          : > "$_boomActionCache"
+
+        } 9>>"$_boomActionLock"
+
+        # Upload current pending file
+        checksum=$(xxhsum -H0 "$_boomActionPending") || return
+        read -r checksum trash <<<"$checksum"
+        __gs_curl_post -f api/boom/action msgType sync file "@$_boomActionPending" checksum "$checksum" || return
+        command rm "$_boomActionPending"
+
+      } 8>>"$_boomSyncLock"
+    ;;
+  esac
+}

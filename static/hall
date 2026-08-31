@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+__boom_hall() {
+  local response
+  response="$(__gs_curl_post api/boom/hall msgType list)" || {
+    __gs_errormsg "Could not communicate with server"
+    return 1
+  }
+
+  local count=$(__gs_parse_response '.entries | length' "$response")
+  if (( count == 0 )); then
+    echo "$(bang 3) The doors of the hallowed hall of BOOM remain sealed $(bang 3)"
+    return
+  fi
+
+  echo "$(bang 3) Those recorded below have achieved recognition in the hallowed hall of BOOM $(bang 3)"
+
+  local user cmd boomed_at
+  while IFS=$'\t' read -r user cmd boomed_at; do
+    echo "$(bang 3) $user: $cmd - $(TZ="$BOOMTZ" date -d "@$boomed_at") $(bang 3)"
+  done < <(__gs_parse_response '.entries[] | [.user, .command, .boomed_at] | @tsv' "$response")
+}

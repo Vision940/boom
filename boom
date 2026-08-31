@@ -18,7 +18,11 @@ __boom_required_fxns() {
 boom() {
   __gs_setdebug $1 || shift
 
-  local action="${1:-empty}"
+  local action="$1"
+  if [[ "$action" != "_init_" ]]; then
+    __doom 127 || return
+  fi
+
   case _${action}_ in
     _avg_) : See command averages
       echo To be implemented!
@@ -29,18 +33,25 @@ boom() {
     _chat_) : Post to boom chat
       echo To be implemented!
     ;;
+    _drought_) : See drought stats
+      __gs_required_fxns __boom_drought_case || return 1
+      __boom_drought_case "${@:2}"
+    ;;
+    _hall_) : View boom HoF
+      __boom_hall
+    ;;
     __init__) : Bring the boom!
       __gs_source_file config boom || return 1
-      __gs_required_args -nd BOOMINSTALL || {
+      __gs_required_args -nd BOOMADMINS || {
         __gs_errormsg "Boom config not set up or invalid" fatal
         __gs_errormsg "Please configure the boom correctly before source" fatal
         return 1
       }
 
-      __gs_source_file static/init-simple boom || return 1
+      __gs_source_file static/init boom || return 1
 
-      if [[ ${FUNCNAME[-1]} == boominit ]]; then
-        echo $_BE_BOOM$_BE_BOOM We bring the boom! $_BE_BOOM$_BE_BOOM
+      if [[ ${FUNCNAME[-1]} == boominit && -z "$DOOMBOOM" ]]; then
+        echo $_BE_BOOM$_BE_BOOM WE BRING THE BOOM! $_BE_BOOM$_BE_BOOM
       fi
 
       [[ ! "$PROMPT_COMMAND" =~ "__boommeter" ]] && PROMPT_COMMAND="__boommeter${PROMPT_COMMAND:+"; $PROMPT_COMMAND"}"
@@ -53,15 +64,21 @@ boom() {
       if declare -f game &>/dev/null; then
         game $@
       else
-        __gs_errormsg "Option $1 not found."
-        __gs_infomsg "Run \`${FUNCNAME[-1]} help\` for help!"
-        return 1
+        __gs_unfound_option "$1"
       fi
     ;;
   esac
 }
 
 __gs_boom_comp() {
+  if (( COMP_CWORD >= 2 )); then
+    case "${COMP_WORDS[1]}" in
+      drought)
+        __gs_call_subcompletion boom drought ___boom_drought_case
+      ;;
+    esac
+    return 0
+  fi
   return 1
 }
 __gs_source_template boom-completion

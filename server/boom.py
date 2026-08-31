@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import json
-import os
 
 from flask import (
     abort,
@@ -21,12 +20,19 @@ from server.games.context import GameContext
 # Create game context object to use server capabilities
 BOOM_GAME = GameContext(__name__)
 
-# Create game blueprint
-bp = Blueprint("boom", __name__, url_prefix="/boom", template_folder="../templates", static_folder="../static")
-
-# Register blueprints to game
+# Create game and api blueprint - these are automatically registered on startup
+bp = Blueprint(
+    "boom",
+    __name__,
+    url_prefix="/boom",
+    template_folder="../templates",
+    static_folder="../static"
+)
 api_routes = [
-    "action"
+    "boom/action",
+    "boom/board",
+    "boom/drought",
+    "boom/hall"
 ]
 api = Api(
    *api_routes,
@@ -35,7 +41,6 @@ api = Api(
     origin="boom",
     version=BOOM_GAME.config.version
 )
-api.register_api(bp)
 
 
 ## Functions ##
